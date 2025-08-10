@@ -34,7 +34,113 @@ instr 1 ; Hi-Hat 1
     chnset aOut, "masterL"
     chnset aOut, "masterR"
 endin
-; ... (Other instruments would be similarly refactored, but the core issue prevents compilation anyway) ...
+
+instr 2 ; Hi-Hat 2
+    iamp=p4
+    kDecay chnget "hh2_decay"; kGain chnget "hh2_gain"; kPitch chnget "hh2_pitch"
+    aNoise noise 1, 0
+    aFiltered butterhp aNoise, kPitch * 2500 + 5000
+    aEnv linsegr 1, kDecay, 0
+    aOut = aFiltered * aEnv * iamp * kGain
+    chnset aOut, "masterL"
+    chnset aOut, "masterR"
+endin
+
+instr 3 ; Snare
+    iamp=p4
+    kDecay chnget "snare_decay"; kGain chnget "snare_gain"; kPitch chnget "snare_pitch"; kFmDepth chnget "snare_fm_depth"
+    kLfo lfo (kFmDepth * 1500), 8
+    aNoise noise 0.8, 0
+    kCutoff = (kPitch * 1500 + 500) + kLfo
+    aFiltered butbp aNoise, kCutoff, 2000
+    aEnv linsegr 1, 0.005, 1, kDecay, 0
+    aOut = aFiltered * aEnv * iamp * kGain
+    chnset aOut, "masterL"
+    chnset aOut, "masterR"
+endin
+
+instr 4 ; Kick 1
+    iamp=p4
+    kDecay chnget "kick1_decay"; kGain chnget "kick1_gain"; kPitch chnget "kick1_pitch"; kFmDepth chnget "kick1_fm_depth"
+    kPitchEnv linsegr 1, 0.03, 0.5, 0.2, 1
+    iBaseFreq = (kPitch * 50) + 40
+    kFmMod lfo (kFmDepth * 20), iBaseFreq*2
+    kCarrierFreq = (iBaseFreq + kFmMod) * kPitchEnv
+    aOsc oscil 1, kCarrierFreq
+    aAmpEnv linsegr 1, kDecay, 0
+    aOut = aOsc * aAmpEnv * iamp
+    chnset aOut, "kick1_rm"
+    if chnget("kick1_rm_kick2") == 1 then
+        aIn_2 chnget "kick2_rm"; aOut *= aIn_2
+    endif
+    if chnget("kick1_rm_kick3") == 1 then
+        aIn_3 chnget "kick3_rm"; aOut *= aIn_3
+    endif
+    aOut *= kGain
+    chnset aOut, "masterL"
+    chnset aOut, "masterR"
+endin
+
+instr 5 ; Kick 2
+    iamp=p4
+    kDecay chnget "kick2_decay"; kGain chnget "kick2_gain"; kPitch chnget "kick2_pitch"; kFmDepth chnget "kick2_fm_depth"
+    kPitchEnv linsegr 1, 0.03, 0.5, 0.2, 1
+    iBaseFreq = (kPitch * 60) + 60
+    kFmMod lfo (kFmDepth * 25), iBaseFreq*2
+    kCarrierFreq = (iBaseFreq + kFmMod) * kPitchEnv
+    aOsc oscil 1, kCarrierFreq
+    aAmpEnv linsegr 1, kDecay, 0
+    aOut = aOsc * aAmpEnv * iamp
+    chnset aOut, "kick2_rm"
+    if chnget("kick2_rm_kick1") == 1 then
+        aIn_1 chnget "kick1_rm"; aOut *= aIn_1
+    endif
+    if chnget("kick2_rm_kick3") == 1 then
+        aIn_3 chnget "kick3_rm"; aOut *= aIn_3
+    endif
+    aOut *= kGain
+    chnset aOut, "masterL"
+    chnset aOut, "masterR"
+endin
+
+instr 6 ; Kick 3
+    iamp=p4
+    kDecay chnget "kick3_decay"; kGain chnget "kick3_gain"; kPitch chnget "kick3_pitch"; kFmDepth chnget "kick3_fm_depth"
+    kPitchEnv linsegr 1, 0.03, 0.5, 0.2, 1
+    iBaseFreq = (kPitch * 70) + 80
+    kFmMod lfo (kFmDepth * 30), iBaseFreq*2
+    kCarrierFreq = (iBaseFreq + kFmMod) * kPitchEnv
+    aOsc oscil 1, kCarrierFreq
+    aAmpEnv linsegr 1, kDecay, 0
+    aOut = aOsc * aAmpEnv * iamp
+    chnset aOut, "kick3_rm"
+    if chnget("kick3_rm_kick1") == 1 then
+        aIn_1 chnget "kick1_rm"; aOut *= aIn_1
+    endif
+    if chnget("kick3_rm_kick2") == 1 then
+        aIn_2 chnget "kick2_rm"; aOut *= aIn_2
+    endif
+    aOut *= kGain
+    chnset aOut, "masterL"
+    chnset aOut, "masterR"
+endin
+
+instr 7 ; Bell
+    iamp=p4
+    kDecay chnget "bell_decay"; kGain chnget "bell_gain"; kPitch chnget "bell_pitch"
+    kFm_B_A chnget "bell_fm_b_a"; kFm_C_B chnget "bell_fm_c_b"; kFm_A_C chnget "bell_fm_a_c"
+    iBaseFreq = (kPitch * 500) + 200
+    aA_mod_amt=kFm_A_C*iBaseFreq*2; aC_mod_amt=kFm_C_B*iBaseFreq*2; aB_mod_amt=kFm_B_A*iBaseFreq*2
+    aA_fbk phasor aC; aC_fbk phasor aB; aB_fbk phasor aA
+    aA oscil 0.5, iBaseFreq+(aB_fbk*aB_mod_amt)
+    aB oscil 0.5, iBaseFreq*1.5+(aC_fbk*aC_mod_amt)
+    aC oscil 0.5, iBaseFreq*2.25+(aA_fbk*aA_mod_amt)
+    aMix = (aA+aB+aC)/3
+    aEnv linsegr 1, kDecay, 0
+    aOut = aMix * aEnv * iamp * kGain
+    chnset aOut, "masterL"
+    chnset aOut, "masterR"
+endin
 """
 
 class RetroDrumMachine:
@@ -162,7 +268,7 @@ class RetroDrumMachine:
             self._draw_mod_curve()
 
     def _setup_gui(self):
-        dpg.create_viewport(title='Retro Drum Tracker', width=1280, height=800)
+        dpg.create_viewport(title='Retro Drum Tracker', maximized=True)
         self.font = None
         with dpg.font_registry():
             try: self.font = dpg.add_font("CGA.ttf", 16)
@@ -185,17 +291,56 @@ class RetroDrumMachine:
         dpg.add_file_dialog(directory_selector=False, show=False, callback=lambda s, a: self._save_state(s, a), tag="file_dialog_save", width=400, height=400)
         dpg.add_file_dialog(directory_selector=False, show=False, callback=lambda s, a: self._load_state(s, a), tag="file_dialog_load", width=400, height=400)
 
-        # UI Definition... (Rest of the GUI setup code)
-        # This part remains largely the same but without hotkeys
+        self.mod_canvas_width, self.mod_canvas_height = 400, 200
+        with dpg.window(label="Modulation Editor", tag="mod_window", show=False, no_close=True, width=self.mod_canvas_width+40):
+            with dpg.group(horizontal=True):
+                for m in ['smooth','quantize','randomize','clear']: dpg.add_button(label=m.capitalize(), callback=lambda s,a,u: self._mod_process(u), user_data=m)
+            with dpg.drawlist(width=self.mod_canvas_width, height=self.mod_canvas_height, tag="mod_canvas"):
+                dpg.draw_rectangle((0,0), (self.mod_canvas_width, self.mod_canvas_height), fill=(240,240,240))
+                dpg.draw_polyline([], color=(0,0,0), thickness=2, tag="mod_polyline")
+            dpg.add_mouse_drag_handler(0, callback=self._update_mod_drawing)
+            dpg.add_button(label="Close", callback=lambda: dpg.hide_item("mod_window"), width=-1)
+
         with dpg.window(label="Retro Drum Tracker", tag="main_window"):
-             # ... content of the window ...
-             pass
+            def add_param_control(p_name, width=120):
+                p_info = self.params[p_name]
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label=p_info['label'], width=80, callback=lambda s,a,u: self._open_mod_editor(s,a,u), user_data=p_name)
+                    if 'min' in p_info: dpg.add_slider_float(tag=p_name, width=width, default_value=p_info['value'], callback=self._update_param_callback, user_data=p_name)
+                    else: dpg.add_checkbox(tag=p_name, default_value=p_info['value'], callback=self._update_param_callback, user_data=p_name)
+
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Start", tag="start_stop_btn", callback=self.start_stop_playback); dpg.add_button(label="+ Mod", tag="mod_mode_btn", callback=lambda s,a: self._toggle_mod_mode(s,a))
+                add_param_control("bpm"); dpg.add_text("★", color=(255,0,0)); add_param_control("master_gain")
+            dpg.add_separator()
+            with dpg.child_window(width=-1, height=-1):
+                with dpg.collapsing_header(label="INSTRUMENT PARAMETERS", default_open=True):
+                    for name in self.instrument_names:
+                        with dpg.collapsing_header(label=name.upper()):
+                            for p_suf in ["gain","pitch","decay","fm_depth"]:
+                                if f"{name}_{p_suf}" in self.params: add_param_control(f"{name}_{p_suf}")
+                    for cat, params in [("BELL FM", ["bell_fm_b_a","bell_fm_c_b","bell_fm_a_c"]), ("KICK RING MODULATION", sorted([p for p in self.params if "rm" in p]))]:
+                        with dpg.collapsing_header(label=cat):
+                            for p_name in params: add_param_control(p_name)
+                dpg.add_separator()
+                with dpg.group():
+                    for name in self.instrument_names:
+                        with dpg.group(horizontal=True):
+                            dpg.add_text(f"{name.upper():<7}")
+                            dpg.add_button(label="<", small=True, callback=self._change_pattern_length, user_data=(name,-1))
+                            dpg.add_input_int(tag=f"len_input_{name}", width=60, default_value=self.pattern_lengths[name], callback=self._set_pattern_length, user_data=name, on_enter=True)
+                            dpg.add_button(label=">", small=True, callback=self._change_pattern_length, user_data=(name,1))
+                            with dpg.group(horizontal=True):
+                                for i in range(self.step_resolution):
+                                    btn = dpg.add_button(label="", tag=f"step_{name}_{i}", width=25, height=25, callback=self._toggle_step_callback, user_data=(name,i))
+                                    dpg.bind_item_theme(btn, "theme_step_off")
 
     def run(self):
         dpg.create_context()
-        self._setup_gui() # This now just defines the structure
+        self._setup_gui()
         dpg.setup_dearpygui()
         dpg.show_viewport()
+        dpg.set_primary_window("main_window", True)
 
         while dpg.is_dearpygui_running():
             try:
