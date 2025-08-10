@@ -9,6 +9,7 @@ external gear.
 import dearpygui.dearpygui as dpg
 import threading
 import time
+import sys
 from pyo import *
 import mido
 
@@ -276,7 +277,14 @@ def setup_audio():
     """Initializes the Pyo audio server and creates all synth instances."""
     global audio_server, synths
     # TODO: Add device selection logic from setup popup
-    audio_server = Server().boot()
+
+    # Explicitly select the audio backend to avoid issues on systems without JACK.
+    if sys.platform == "win32":
+        print("Windows detected. Using 'DirectSound' audio backend.")
+        audio_server = Server(audio="ds").boot()
+    else:
+        # For other systems (Linux, macOS), let Pyo choose the best backend.
+        audio_server = Server().boot()
 
     # Create a synth instance for each sound defined in the constants.
     for sound in DRUM_SOUNDS:
