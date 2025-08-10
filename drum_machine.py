@@ -182,14 +182,19 @@ class RetroDrumMachine:
         self._init_csound()
 
     def _init_csound(self):
-        self.cs.setOption("-odac") # Use default system audio output
-        self.cs.setOption(f"-ksmps={self.cs.sr() // 256}") # Set ksmps based on buffer size
+        self.cs.setOption("-odac")
+        self.cs.setOption(f"-ksmps={self.cs.sr() // 256}")
         self.cs.setOption("-b256")
         self.cs.setOption("-B2048")
-        self.cs.compileOrc(CSOUND_ORC)
-        self.cs.start()
-        self.cs.scoreEvent('i', (99, 0, 999999))
-        self.cs.scoreEvent('i', (100, 0, 999999))
+
+        # Ensure orchestra compilation is successful before starting
+        result = self.cs.compileOrc(CSOUND_ORC)
+        if result == 0:
+            self.cs.start()
+            self.cs.scoreEvent('i', (99, 0, 999999))
+            self.cs.scoreEvent('i', (100, 0, 999999))
+        else:
+            print("Error: Csound orchestra failed to compile. The application will not make sound.")
 
     def _create_parameter_defaults(self):
         self.params = {
@@ -331,20 +336,21 @@ class RetroDrumMachine:
 
     def _setup_gui(self):
         dpg.create_context()
-        # Corrected Font Loading
+        # Corrected Font Loading Logic
+        self.font = None
         with dpg.font_registry():
             try:
-                # Try to load the custom font file
                 self.font = dpg.add_font("CGA.ttf", 16)
             except Exception as e:
-                # If it fails, fall back to the default font
                 print(f"Warning: Could not load 'CGA.ttf'. Using default font. Error: {e}")
-                self.font = dpg.add_font()
 
         with dpg.theme() as self.global_theme:
             with dpg.theme_component(dpg.mvAll):
                 dpg.add_theme_color(dpg.mvThemeCol_WindowBg,(211,211,211)); dpg.add_theme_color(dpg.mvThemeCol_Border,(0,0,0)); dpg.add_theme_color(dpg.mvThemeCol_FrameBg,(211,211,211)); dpg.add_theme_color(dpg.mvThemeCol_Button,(211,211,211)); dpg.add_theme_color(dpg.mvThemeCol_Header,(180,180,180)); dpg.add_theme_color(dpg.mvThemeCol_CheckMark,(0,0,0)); dpg.add_theme_color(dpg.mvThemeCol_SliderGrab,(0,0,0)); dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (211,211,211))
-                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize,1); dpg.add_theme_style(dpg.mvStyleVar_WindowBorderSize,1); dpg.add_theme_style(dpg.mvStyleVar_ChildBorderSize,1); dpg.add_theme_style(dpg.mvStyleVar_FrameRounding,0); dpg.add_theme_font(self.font)
+                dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize,1); dpg.add_theme_style(dpg.mvStyleVar_WindowBorderSize,1); dpg.add_theme_style(dpg.mvStyleVar_ChildBorderSize,1); dpg.add_theme_style(dpg.mvStyleVar_FrameRounding,0)
+                if self.font:
+                    dpg.add_theme_font(self.font)
+
         dpg.bind_theme(self.global_theme)
         with dpg.theme() as self.theme_step_off:
             with dpg.theme_component(dpg.mvButton): dpg.add_theme_color(dpg.mvThemeCol_Button, (180,180,180))
