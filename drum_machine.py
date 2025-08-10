@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayo
                                QGraphicsView, QGraphicsScene, QGraphicsPathItem, QComboBox,
                                QScrollArea)
 from PySide6.QtCore import QThread, Signal, Qt, QPointF
-from PySide6.QtGui import QFontDatabase, QPen, QPainterPath, QColor
+from PySide6.QtGui import QFontDatabase, QPen, QPainterPath, QColor, QPainter
 import threading
 from scipy import signal
 import math
