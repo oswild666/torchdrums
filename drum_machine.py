@@ -7,7 +7,7 @@ import threading
 from math import sin, pi
 
 # ==============================================================================
-# CSOUND ORCHESTRA (Corrected for maximum compatibility)
+# CSOUND ORCHESTRA (Final attempt at syntax fix)
 # ==============================================================================
 CSOUND_ORC = """
 sr = 44100
@@ -23,10 +23,10 @@ instr 99 ; Master output
     kMasterGain chnget "master_gain"
     aL *= kMasterGain
     aR *= kMasterGain
-    ; Use two mono limiters for maximum compatibility, avoiding multi-out opcodes.
-    aL_lim limiter aL, 0.9, 0.01
-    aR_lim limiter aR, 0.9, 0.01
-    outs aL_lim, aR_lim
+    ; Use two mono limiters with no underscores in variable names
+    aLlim limiter aL, 0.9, 0.01
+    aRlim limiter aR, 0.9, 0.01
+    outs aLlim, aRlim
     zaclear 1, 2, 3, 4, 5
 endin
 
@@ -363,8 +363,7 @@ class RetroDrumMachine:
                 dpg.add_button(label="Start", tag="start_stop_btn", callback=self.start_stop_playback); dpg.add_button(label="+ Mod", tag="mod_mode_btn", callback=self._toggle_mod_mode)
                 add_param_control("bpm"); dpg.add_text("★", color=(255,0,0)); add_param_control("master_gain")
             dpg.add_separator()
-            # Remove use_internal_id for compatibility
-            with dpg.child_window():
+            with dpg.child_window(): # Removed use_internal_id
                 with dpg.collapsing_header(label="INSTRUMENT PARAMETERS", default_open=True):
                     for name in self.instrument_names:
                         with dpg.collapsing_header(label=name.upper()):
@@ -391,6 +390,8 @@ class RetroDrumMachine:
 
     def run(self):
         self._setup_gui()
+        # dpg.create_viewport must be called BEFORE setup_dearpygui
+        dpg.create_viewport(title='Retro Drum Tracker', width=1280, height=800)
         dpg.setup_dearpygui()
         dpg.show_viewport()
         self.dpg_started = True
