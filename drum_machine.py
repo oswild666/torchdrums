@@ -7,7 +7,7 @@ import threading
 from math import sin, pi
 
 # ==============================================================================
-# CSOUND ORCHESTRA (Corrected)
+# CSOUND ORCHESTRA
 # ==============================================================================
 CSOUND_ORC = """
 sr = 44100
@@ -188,7 +188,6 @@ class RetroDrumMachine:
         self.cs.setOption("-B2048")
         self.cs.compileOrc(CSOUND_ORC)
         self.cs.start()
-        # Corrected scoreEvent calls
         self.cs.scoreEvent('i', (99, 0, 999999))
         self.cs.scoreEvent('i', (100, 0, 999999))
 
@@ -223,7 +222,6 @@ class RetroDrumMachine:
             self._apply_modulation()
             for name in self.instrument_names:
                 if self.patterns[name][self.current_step] == 1 and self.current_step < self.pattern_lengths[name]:
-                    # Corrected scoreEvent call
                     self.cs.scoreEvent('i', (self.instrument_map[name], 0, 0.5, 1.0))
             time.sleep(sleep_duration)
             self.current_step += self.ping_pong_direction
@@ -333,9 +331,16 @@ class RetroDrumMachine:
 
     def _setup_gui(self):
         dpg.create_context()
-        try:
-            with dpg.font_registry(): self.font = dpg.add_font("CGA.ttf", 16)
-        except: self.font = dpg.add_font()
+        # Corrected Font Loading
+        with dpg.font_registry():
+            try:
+                # Try to load the custom font file
+                self.font = dpg.add_font("CGA.ttf", 16)
+            except Exception as e:
+                # If it fails, fall back to the default font
+                print(f"Warning: Could not load 'CGA.ttf'. Using default font. Error: {e}")
+                self.font = dpg.add_font()
+
         with dpg.theme() as self.global_theme:
             with dpg.theme_component(dpg.mvAll):
                 dpg.add_theme_color(dpg.mvThemeCol_WindowBg,(211,211,211)); dpg.add_theme_color(dpg.mvThemeCol_Border,(0,0,0)); dpg.add_theme_color(dpg.mvThemeCol_FrameBg,(211,211,211)); dpg.add_theme_color(dpg.mvThemeCol_Button,(211,211,211)); dpg.add_theme_color(dpg.mvThemeCol_Header,(180,180,180)); dpg.add_theme_color(dpg.mvThemeCol_CheckMark,(0,0,0)); dpg.add_theme_color(dpg.mvThemeCol_SliderGrab,(0,0,0)); dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (211,211,211))
