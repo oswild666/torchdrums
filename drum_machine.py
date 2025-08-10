@@ -56,7 +56,16 @@ class Snare(Instrument):
     def _play_internal(self):
         d, sr, p = self.params['decay'], self.sample_rate, self.params; l=int(d*sr); t=np.linspace(0,d,l,endpoint=False); n=np.random.randn(l); nc=2000+p['tone']*8000; b,a=butter_bandpass(nc-1000,nc,sr,order=2); fn=apply_filter(n,b,a); ne=np.exp(-15*t/d); np_ = fn*ne*p['noise_level']; bp=np.sin(2*np.pi*p['body_freq']*t); be=np.exp(-10*t/d); bp*=be*(1.0-p['noise_level']); return ((np_+bp)*0.8).astype(np.float32)
 class Hat(Instrument):
-    def __init__(self,s,n,d,cg=None): super().__init__(s,n); self.choke_group=cg; self.params={'decay':d,'fm_amount':2.5,'high_pass':7000}; self.param_defs={'decay':{'min':5,'max':1000,'init':d*1000,'scale':1000.0},'fm_amount':{'min':0,'max':100,'init':25,'scale':10.0},'high_pass':{'min':2000,'max':15000,'init':7000}}; self.initialize_mod_data()
+    def __init__(self, sample_rate, name, decay, choke_group=None):
+        super().__init__(sample_rate, name)
+        self.choke_group = choke_group
+        self.params = {'decay': decay, 'fm_amount': 2.5, 'high_pass': 7000}
+        self.param_defs = {
+            'decay': {'min': 5, 'max': 1000, 'init': decay * 1000, 'scale': 1000.0},
+            'fm_amount': {'min': 0, 'max': 100, 'init': 25, 'scale': 10.0},
+            'high_pass': {'min': 2000, 'max': 15000, 'init': 7000},
+        }
+        self.initialize_mod_data()
     def _play_internal(self):
         d,sr,p = self.params['decay'],self.sample_rate,self.params; l=int(d*sr); t=np.linspace(0,d,l,endpoint=False); f=[210,330,470,510,680,920]; fm=np.sin(2*np.pi*110*t)*p['fm_amount']; sm=sum(signal.square(2*np.pi*(fr+fm)*t) for fr in f)/len(f); b,a=butter_highpass(p['high_pass'],sr,order=2); fs=apply_filter(sm,b,a); e=np.exp(-25*t/d); return (fs*e).astype(np.float32)
 class Bell(Instrument):
