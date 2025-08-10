@@ -7,7 +7,7 @@ import threading
 from math import sin, pi
 
 # ==============================================================================
-# CSOUND ORCHESTRA
+# CSOUND ORCHESTRA (Corrected)
 # ==============================================================================
 CSOUND_ORC = """
 sr = 44100
@@ -15,84 +15,91 @@ ksmps = 256
 nchnls = 2
 0dbfs = 1
 
-zakinit 1, 4 ; Init ZAK space: 1=Master Out, 2-4 for Kick RM
+; Use ZAK channels for routing:
+; 1: Master Out Left
+; 2: Master Out Right
+; 3: Kick 1 RM Source
+; 4: Kick 2 RM Source
+; 5: Kick 3 RM Source
+zakinit 5, 0
 
 ; Master output instrument with limiter
 instr 99
-    aL, aR zae 1
+    aL zae 1 ; Read Left channel
+    aR zae 2 ; Read Right channel
     kMasterGain chnget "master_gain"
     aL *= kMasterGain
     aR *= kMasterGain
-    ; Limiter to prevent clipping, as requested
     aL, aR limiter aL, aR, 0.9, 0.01
     outs aL, aR
-    zaclear 1
+    zaclear 1, 2, 3, 4, 5
 endin
 
-; ZAK clearing instrument
+; ZAK clearing instrument (redundant but safe)
 instr 100
-    zaclear 1, 2, 3, 4
+    zaclear 1, 2, 3, 4, 5
 endin
 
-; --- Instruments ---
+; --- Instruments (Mono sources, writing to Stereo Master) ---
 
 instr 1 ; Hi-Hat 1
-    iamp=p4
+    iamp=p3
     kDecay chnget "hh1_decay"; kGain chnget "hh1_gain"; kPitch chnget "hh1_pitch"
     aNoise noise 1, 0
     aFiltered butterhp aNoise, kPitch * 2000 + 4000
     aEnv linsegr 1, kDecay, 0
     aOut = aFiltered * aEnv * iamp * kGain
-    zawrite 1, aOut, aOut
+    zawrite 1, aOut ; Write to L
+    zawrite 2, aOut ; Write to R
 endin
 
 instr 2 ; Hi-Hat 2
-    iamp=p4
+    iamp=p3
     kDecay chnget "hh2_decay"; kGain chnget "hh2_gain"; kPitch chnget "hh2_pitch"
     aNoise noise 1, 0
     aFiltered butterhp aNoise, kPitch * 2500 + 5000
     aEnv linsegr 1, kDecay, 0
     aOut = aFiltered * aEnv * iamp * kGain
-    zawrite 1, aOut, aOut
+    zawrite 1, aOut; zawrite 2, aOut
 endin
 
 instr 3 ; Snare
-    iamp=p4
+    iamp=p3
     kDecay chnget "snare_decay"; kGain chnget "snare_gain"; kPitch chnget "snare_pitch"; kFmDepth chnget "snare_fm_depth"
-    kLfo lfo (kFmDepth * 1500), 8 ; LFO modulates filter cutoff
+    kLfo lfo (kFmDepth * 1500), 8
     aNoise noise 0.8, 0
     kCutoff = (kPitch * 1500 + 500) + kLfo
     aFiltered butbp aNoise, kCutoff, 2000
     aEnv linsegr 1, 0.005, 1, kDecay, 0
     aOut = aFiltered * aEnv * iamp * kGain
-    zawrite 1, aOut, aOut
+    zawrite 1, aOut; zawrite 2, aOut
 endin
 
 instr 4 ; Kick 1
-    iamp=p4
+    iamp=p3
     kDecay chnget "kick1_decay"; kGain chnget "kick1_gain"; kPitch chnget "kick1_pitch"; kFmDepth chnget "kick1_fm_depth"
     kPitchEnv linsegr 1, 0.03, 0.5, 0.2, 1
     iBaseFreq = (kPitch * 50) + 40
-    kFmMod lfo (kFmDepth * 20), iBaseFreq*2 ; FM Oscillator
+    kFmMod lfo (kFmDepth * 20), iBaseFreq*2
     kCarrierFreq = (iBaseFreq + kFmMod) * kPitchEnv
     aOsc oscil 1, kCarrierFreq
     aAmpEnv linsegr 1, kDecay, 0
-    aOut = aOsc * aAmpEnv * iamp * kGain
-    ; For Ring-Mod, write pre-RM signal to ZAK channel 2
-    zawrite 2, aOut, aOut
+    aOut = aOsc * aAmpEnv * iamp
+    zawrite 3, aOut ; Write pre-RM signal to its dedicated channel
     if chnget("kick1_rm_kick2") == 1 then
-        aIn_2, aIn_2_r zar 3 ; Read from Kick 2's ZAK channel
+        aIn_2 zar 4 ; Read from Kick 2's channel
         aOut *= aIn_2
     endif
     if chnget("kick1_rm_kick3") == 1 then
-        aIn_3, aIn_3_r zar 4 ; Read from Kick 3's ZAK channel
+        aIn_3 zar 5 ; Read from Kick 3's channel
         aOut *= aIn_3
     endif
-    zawrite 1, aOut, aOut
+    aOut *= kGain
+    zawrite 1, aOut; zawrite 2, aOut
 endin
 
 instr 5 ; Kick 2
-    iamp=p4
+    iamp=p3
     kDecay chnget "kick2_decay"; kGain chnget "kick2_gain"; kPitch chnget "kick2_pitch"; kFmDepth chnget "kick2_fm_depth"
     kPitchEnv linsegr 1, 0.03, 0.5, 0.2, 1
     iBaseFreq = (kPitch * 60) + 60
@@ -100,21 +107,22 @@ instr 5 ; Kick 2
     kCarrierFreq = (iBaseFreq + kFmMod) * kPitchEnv
     aOsc oscil 1, kCarrierFreq
     aAmpEnv linsegr 1, kDecay, 0
-    aOut = aOsc * aAmpEnv * iamp * kGain
-    zawrite 3, aOut, aOut
+    aOut = aOsc * aAmpEnv * iamp
+    zawrite 4, aOut
     if chnget("kick2_rm_kick1") == 1 then
-        aIn_1,aIn_1_r zar 2
+        aIn_1 zar 3
         aOut *= aIn_1
     endif
     if chnget("kick2_rm_kick3") == 1 then
-        aIn_3,aIn_3_r zar 4
+        aIn_3 zar 5
         aOut *= aIn_3
     endif
-    zawrite 1, aOut, aOut
+    aOut *= kGain
+    zawrite 1, aOut; zawrite 2, aOut
 endin
 
 instr 6 ; Kick 3
-    iamp=p4
+    iamp=p3
     kDecay chnget "kick3_decay"; kGain chnget "kick3_gain"; kPitch chnget "kick3_pitch"; kFmDepth chnget "kick3_fm_depth"
     kPitchEnv linsegr 1, 0.03, 0.5, 0.2, 1
     iBaseFreq = (kPitch * 70) + 80
@@ -122,38 +130,34 @@ instr 6 ; Kick 3
     kCarrierFreq = (iBaseFreq + kFmMod) * kPitchEnv
     aOsc oscil 1, kCarrierFreq
     aAmpEnv linsegr 1, kDecay, 0
-    aOut = aOsc * aAmpEnv * iamp * kGain
-    zawrite 4, aOut, aOut
+    aOut = aOsc * aAmpEnv * iamp
+    zawrite 5, aOut
     if chnget("kick3_rm_kick1") == 1 then
-        aIn_1, aIn_1_r zar 2
+        aIn_1 zar 3
         aOut *= aIn_1
     endif
     if chnget("kick3_rm_kick2") == 1 then
-        aIn_2, aIn_2_r zar 3
+        aIn_2 zar 4
         aOut *= aIn_2
     endif
-    zawrite 1, aOut, aOut
+    aOut *= kGain
+    zawrite 1, aOut; zawrite 2, aOut
 endin
 
 instr 7 ; Bell
-    iamp=p4
+    iamp=p3
     kDecay chnget "bell_decay"; kGain chnget "bell_gain"; kPitch chnget "bell_pitch"
     kFm_B_A chnget "bell_fm_b_a"; kFm_C_B chnget "bell_fm_c_b"; kFm_A_C chnget "bell_fm_a_c"
     iBaseFreq = (kPitch * 500) + 200
-    ; Circular FM: A->C, C->B, B->A
-    aA_mod_amt = kFm_A_C * iBaseFreq * 2
-    aC_mod_amt = kFm_C_B * iBaseFreq * 2
-    aB_mod_amt = kFm_B_A * iBaseFreq * 2
-    aA_fbk phasor aC
-    aC_fbk phasor aB
-    aB_fbk phasor aA
+    aA_mod_amt = kFm_A_C*iBaseFreq*2; aC_mod_amt = kFm_C_B*iBaseFreq*2; aB_mod_amt = kFm_B_A*iBaseFreq*2
+    aA_fbk phasor aC; aC_fbk phasor aB; aB_fbk phasor aA
     aA oscil 0.5, iBaseFreq + (aB_fbk * aB_mod_amt)
     aB oscil 0.5, iBaseFreq * 1.5 + (aC_fbk * aC_mod_amt)
     aC oscil 0.5, iBaseFreq * 2.25 + (aA_fbk * aA_mod_amt)
     aMix = (aA + aB + aC) / 3
     aEnv linsegr 1, kDecay, 0
     aOut = aMix * aEnv * iamp * kGain
-    zawrite 1, aOut, aOut
+    zawrite 1, aOut; zawrite 2, aOut
 endin
 """
 
@@ -178,15 +182,15 @@ class RetroDrumMachine:
         self._init_csound()
 
     def _init_csound(self):
-        self.cs.setOption("-odac")
-        self.cs.setOption("-+rtaudio=jack")
-        self.cs.setOption(f"-ksmps=256")
+        self.cs.setOption("-odac") # Use default system audio output
+        self.cs.setOption(f"-ksmps={self.cs.sr() // 256}") # Set ksmps based on buffer size
         self.cs.setOption("-b256")
         self.cs.setOption("-B2048")
         self.cs.compileOrc(CSOUND_ORC)
         self.cs.start()
-        self.cs.scoreEvent(0, 'i', 99, 0, 999999)
-        self.cs.scoreEvent(0, 'i', 100, 0, 999999)
+        # Corrected scoreEvent calls
+        self.cs.scoreEvent('i', (99, 0, 999999))
+        self.cs.scoreEvent('i', (100, 0, 999999))
 
     def _create_parameter_defaults(self):
         self.params = {
@@ -219,7 +223,8 @@ class RetroDrumMachine:
             self._apply_modulation()
             for name in self.instrument_names:
                 if self.patterns[name][self.current_step] == 1 and self.current_step < self.pattern_lengths[name]:
-                    self.cs.scoreEvent(0, 'i', self.instrument_map[name], 0, 0.5)
+                    # Corrected scoreEvent call
+                    self.cs.scoreEvent('i', (self.instrument_map[name], 0, 0.5, 1.0))
             time.sleep(sleep_duration)
             self.current_step += self.ping_pong_direction
             if not (0 <= self.current_step < self.step_resolution):
@@ -236,7 +241,6 @@ class RetroDrumMachine:
                 if "min" in data: final_value = max(data["min"], min(data["max"], final_value))
                 self.cs.setControlChannel(name, final_value)
 
-    # --- UI Callbacks and Helpers ---
     def _update_param_callback(self, sender, app_data, user_data): self.params[user_data]["value"] = app_data
     def _toggle_step_callback(self, s, a, u):
         self.patterns[u[0]][u[1]] = 1 - self.patterns[u[0]][u[1]]
@@ -260,7 +264,6 @@ class RetroDrumMachine:
                 theme = self.theme_step_active if not clear and i == self.current_step else (self.theme_step_on if self.patterns[name][i] else self.theme_step_off)
                 dpg.bind_item_theme(f"step_{name}_{i}", theme)
 
-    # --- Modulation System ---
     def _toggle_mod_mode(self, s, a):
         self.mod_assign_mode = not self.mod_assign_mode
         dpg.set_item_label(s, "Exit Mod Mode" if self.mod_assign_mode else "+ Mod")
@@ -293,11 +296,9 @@ class RetroDrumMachine:
         self.modulation_curves[self.active_mod_param] = np.clip(c,0,1)
         self._draw_mod_curve()
 
-    # --- Save/Load State ---
     def _save_state(self, s, a):
         state = {
-            "patterns": self.patterns,
-            "pattern_lengths": self.pattern_lengths,
+            "patterns": self.patterns, "pattern_lengths": self.pattern_lengths,
             "params": {k: v['value'] for k, v in self.params.items()},
             "mod_curves": {k: v.tolist() for k, v in self.modulation_curves.items()}
         }
@@ -306,18 +307,18 @@ class RetroDrumMachine:
         with open(a['file_path_name'], 'r') as f: state = json.load(f)
         self.patterns = state.get("patterns", self.patterns)
         self.pattern_lengths = state.get("pattern_lengths", self.pattern_lengths)
-        loaded_params = state.get("params", {})
-        for k, v in loaded_params.items():
+        for k, v in state.get("params", {}).items():
             if k in self.params: self.params[k]['value'] = v
-        loaded_curves = state.get("mod_curves", {})
-        for k, v in loaded_curves.items():
+        for k, v in state.get("mod_curves", {}).items():
             if k in self.modulation_curves: self.modulation_curves[k] = np.array(v)
         self._update_ui_from_state()
     def _update_ui_from_state(self):
         for name, data in self.params.items(): dpg.set_value(name, data['value'])
         for name, length in self.pattern_lengths.items(): dpg.set_value(f"len_input_{name}", length)
         for name in self.instrument_names:
-            for i in range(self.step_resolution): self._toggle_step_callback(f"step_{name}_{i}", 0, (name, i)) # Force UI update
+            for i in range(self.step_resolution):
+                is_on = self.patterns[name][i] == 1
+                dpg.bind_item_theme(f"step_{name}_{i}", self.theme_step_on if is_on else self.theme_step_off)
 
     def _key_press_handler(self, s, a):
         if a == dpg.mvKey_Spacebar: self.start_stop_playback()
@@ -349,27 +350,26 @@ class RetroDrumMachine:
 
         dpg.add_file_dialog(directory_selector=False, show=False, callback=self._save_state, tag="file_dialog_save", file_count=1, default_filename="pattern.json", width=400, height=400)
         dpg.add_file_dialog(directory_selector=False, show=False, callback=self._load_state, tag="file_dialog_load", file_count=1, width=400, height=400)
-
         self.mod_canvas_width, self.mod_canvas_height = 400, 200
         with dpg.window(label="Modulation Editor", tag="mod_window", show=False, no_close=True, width=self.mod_canvas_width+40):
             with dpg.group(horizontal=True):
-                for m in ['smooth','quantize','randomize','clear']: dpg.add_button(label=m.capitalize(), c=self._mod_process, u=m)
-            with dpg.drawlist(w=self.mod_canvas_width, h=self.mod_canvas_height, tag="mod_canvas"):
-                dpg.draw_rectangle((0,0), (self.mod_canvas_width, self.mod_canvas_height), f=(240,240,240))
-                dpg.draw_polyline([], (0,0,0), thickness=2, tag="mod_polyline")
-            with dpg.handler_registry(): dpg.add_mouse_drag_handler(0, c=self._update_mod_drawing)
-            dpg.add_button(label="Close", c=lambda: dpg.hide_item("mod_window"), width=-1)
+                for m in ['smooth','quantize','randomize','clear']: dpg.add_button(label=m.capitalize(), callback=self._mod_process, user_data=m)
+            with dpg.drawlist(width=self.mod_canvas_width, height=self.mod_canvas_height, tag="mod_canvas"):
+                dpg.draw_rectangle((0,0), (self.mod_canvas_width, self.mod_canvas_height), fill=(240,240,240))
+                dpg.draw_polyline([], color=(0,0,0), thickness=2, tag="mod_polyline")
+            with dpg.handler_registry(): dpg.add_mouse_drag_handler(0, callback=self._update_mod_drawing)
+            dpg.add_button(label="Close", callback=lambda: dpg.hide_item("mod_window"), width=-1)
 
         with dpg.window(label="Retro Drum Tracker", tag="main_window"):
             def add_param_control(p_name, width=120):
                 p_info = self.params[p_name]
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label=p_info['label'], w=80, c=self._open_mod_editor, u=p_name)
-                    if 'min' in p_info: dpg.add_slider_float(tag=p_name, w=width, min_v=p_info['min'], max_v=p_info['max'], c=self._update_param_callback, u=p_name, default_v=p_info['value'])
-                    else: dpg.add_checkbox(tag=p_name, c=self._update_param_callback, u=p_name, default_v=p_info['value'])
+                    dpg.add_button(label=p_info['label'], width=80, callback=self._open_mod_editor, user_data=p_name)
+                    if 'min' in p_info: dpg.add_slider_float(tag=p_name, width=width, min_value=p_info['min'], max_value=p_info['max'], callback=self._update_param_callback, user_data=p_name, default_value=p_info['value'])
+                    else: dpg.add_checkbox(tag=p_name, callback=self._update_param_callback, user_data=p_name, default_value=p_info['value'])
 
             with dpg.group(horizontal=True):
-                dpg.add_button(label="Start", tag="start_stop_btn", c=self.start_stop_playback); dpg.add_button(label="+ Mod", tag="mod_mode_btn", c=self._toggle_mod_mode)
+                dpg.add_button(label="Start", tag="start_stop_btn", callback=self.start_stop_playback); dpg.add_button(label="+ Mod", tag="mod_mode_btn", callback=self._toggle_mod_mode)
                 add_param_control("bpm"); dpg.add_text("★", color=(255,0,0)); add_param_control("master_gain")
             dpg.add_separator()
             with dpg.child_window(tag="main_child_window"):
@@ -378,7 +378,7 @@ class RetroDrumMachine:
                         with dpg.collapsing_header(label=name.upper()):
                             for p_suf in ["gain","pitch","decay","fm_depth"]:
                                 if f"{name}_{p_suf}" in self.params: add_param_control(f"{name}_{p_suf}")
-                    for cat, params in [("BELL FM", ["bell_fm_b_a","bell_fm_c_b","bell_fm_a_c"]), ("KICK RING MOD", sorted([p for p in self.params if "rm" in p]))]:
+                    for cat, params in [("BELL FM", ["bell_fm_b_a","bell_fm_c_b","bell_fm_a_c"]), ("KICK RING MODULATION", sorted([p for p in self.params if "rm" in p]))]:
                         with dpg.collapsing_header(label=cat):
                             for p_name in params: add_param_control(p_name)
                 dpg.add_separator()
@@ -386,12 +386,12 @@ class RetroDrumMachine:
                     for name in self.instrument_names:
                         with dpg.group(horizontal=True):
                             dpg.add_text(f"{name.upper():<7}")
-                            dpg.add_button(label="<", small=True, c=self._change_pattern_length, u=(name,-1))
-                            dpg.add_input_int(tag=f"len_input_{name}", w=60, default_v=self.pattern_lengths[name], c=self._set_pattern_length, u=name, on_enter=True)
-                            dpg.add_button(label=">", small=True, c=self._change_pattern_length, u=(name,1))
+                            dpg.add_button(label="<", small=True, callback=self._change_pattern_length, user_data=(name,-1))
+                            dpg.add_input_int(tag=f"len_input_{name}", width=60, default_value=self.pattern_lengths[name], callback=self._set_pattern_length, user_data=name, on_enter=True)
+                            dpg.add_button(label=">", small=True, callback=self._change_pattern_length, user_data=(name,1))
                             with dpg.group(horizontal=True):
                                 for i in range(self.step_resolution):
-                                    btn = dpg.add_button(label="", tag=f"step_{name}_{i}", w=25, h=25, c=self._toggle_step_callback, u=(name,i))
+                                    btn = dpg.add_button(label="", tag=f"step_{name}_{i}", width=25, height=25, callback=self._toggle_step_callback, user_data=(name,i))
                                     dpg.bind_item_theme(btn, self.theme_step_off)
         with dpg.handler_registry(): dpg.add_key_press_handler(callback=self._key_press_handler)
 
