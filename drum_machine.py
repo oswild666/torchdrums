@@ -5,10 +5,9 @@ import json
 import time
 import threading
 from math import sin, pi
-import queue
 
 # ==============================================================================
-# CSOUND ORCHESTRA (Corrected for compatibility)
+# CSOUND ORCHESTRA (Corrected for maximum compatibility)
 # ==============================================================================
 CSOUND_ORC = """
 sr = 44100
@@ -19,12 +18,15 @@ nchnls = 2
 zakinit 5, 0
 
 instr 99 ; Master output
-    aL zar 1 ; Use zar instead of zae for wider compatibility
+    aL zar 1
     aR zar 2
     kMasterGain chnget "master_gain"
-    aL *= kMasterGain; aR *= kMasterGain
-    aL, aR limiter aL, aR, 0.9, 0.01
-    outs aL, aR
+    aL *= kMasterGain
+    aR *= kMasterGain
+    ; Use two mono limiters for maximum compatibility, avoiding multi-out opcodes.
+    aL_lim limiter aL, 0.9, 0.01
+    aR_lim limiter aR, 0.9, 0.01
+    outs aL_lim, aR_lim
     zaclear 1, 2, 3, 4, 5
 endin
 
@@ -147,6 +149,7 @@ endin
 class RetroDrumMachine:
     def __init__(self):
         self.cs = ctcsound.Csound()
+        self.dpg_started = False
         self.sequencer_thread = None
         self.is_playing = False
         self.step_resolution = 32
@@ -157,7 +160,6 @@ class RetroDrumMachine:
         self.patterns = {name: [0] * self.step_resolution for name in self.instrument_names}
         self.pattern_lengths = {name: self.step_resolution for name in self.instrument_names}
         self.params = {}
-        self.gui_queue = queue.Queue() # For thread-safe GUI updates
         self._create_parameter_defaults()
         self.modulation_curves = {param: np.ones(self.step_resolution) for param in self.params}
         self.mod_assign_mode = False
@@ -203,7 +205,8 @@ class RetroDrumMachine:
         while self.is_playing:
             bpm = self.params["bpm"]["value"]
             sleep_duration = 1.0 / (bpm / 60.0 * 4.0)
-            self.gui_queue.put({"action": "update_highlight"})
+            if self.dpg_started:
+                dpg.call_later(self._update_step_highlight, clear=False)
             self._apply_modulation()
             for name in self.instrument_names:
                 if self.patterns[name][self.current_step] == 1 and self.current_step < self.pattern_lengths[name]:
@@ -224,61 +227,110 @@ class RetroDrumMachine:
                 if "min" in data: final_value = max(data["min"], min(data["max"], final_value))
                 self.cs.setControlChannel(name, final_value)
 
-    def _update_param_callback(self, sender, data): self.params[dpg.get_item_user_data(sender)]["value"] = data
-    def _toggle_step_callback(self, sender, data):
-        u = dpg.get_item_user_data(sender)
-        self.patterns[u[0]][u[1]] = 1 - self.patterns[u[0]][u[1]]
-        dpg.bind_item_theme(sender, self.theme_step_on if self.patterns[u[0]][u[1]] else self.theme_step_off)
-    def _change_pattern_length(self, sender, data):
-        u = dpg.get_item_user_data(sender)
-        self.pattern_lengths[u[0]] = max(1,min(self.step_resolution, self.pattern_lengths[u[0]]+u[1]))
-        dpg.set_value(f"len_input_{u[0]}", self.pattern_lengths[u[0]])
-    def _set_pattern_length(self, sender, data):
-        u = dpg.get_item_user_data(sender)
-        self.pattern_lengths[u] = max(1,min(self.step_resolution,data))
-    def start_stop_playback(self, **kwargs):
+    def _update_param_callback(self, sender, app_data, user_data): self.params[user_data]["value"] = app_data
+    def _toggle_step_callback(self, sender, app_data, user_data):
+        self.patterns[user_data[0]][user_data[1]] = 1 - self.patterns[user_data[0]][user_data[1]]
+        dpg.bind_item_theme(sender, self.theme_step_on if self.patterns[user_data[0]][user_data[1]] else self.theme_step_off)
+    def _change_pattern_length(self, sender, app_data, user_data):
+        self.pattern_lengths[user_data[0]] = max(1,min(self.step_resolution, self.pattern_lengths[user_data[0]]+user_data[1]))
+        dpg.set_value(f"len_input_{user_data[0]}", self.pattern_lengths[user_data[0]])
+    def _set_pattern_length(self, sender, app_data, user_data): self.pattern_lengths[user_data] = max(1,min(self.step_resolution,app_data))
+    def start_stop_playback(self, sender, app_data, user_data):
         self.is_playing = not self.is_playing
-        dpg.set_item_label("start_stop_btn", "Stop" if self.is_playing else "Start")
+        dpg.set_item_label(sender, "Stop" if self.is_playing else "Start")
         if self.is_playing:
             self.current_step = 0; self.ping_pong_direction = 1
             self.sequencer_thread = threading.Thread(target=self._sequencer_loop, daemon=True); self.sequencer_thread.start()
         elif self.sequencer_thread: self.sequencer_thread.join()
-        self.gui_queue.put({"action": "update_highlight", "clear": not self.is_playing})
+        if self.dpg_started: dpg.call_later(self._update_step_highlight, clear=not self.is_playing)
     def _update_step_highlight(self, clear=False):
+        if not self.dpg_started: return
         for name in self.instrument_names:
             for i in range(self.step_resolution):
                 theme = self.theme_step_active if not clear and i == self.current_step else (self.theme_step_on if self.patterns[name][i] else self.theme_step_off)
                 dpg.bind_item_theme(f"step_{name}_{i}", theme)
 
-    def _key_press_handler(self, sender, data):
-        # Use integer key codes for old DPG compatibility
-        if data == 32: self.start_stop_playback() # 32 is spacebar
-        elif data == 37 and not self.is_playing: # 37 is left arrow
+    def _toggle_mod_mode(self, sender, app_data, user_data):
+        self.mod_assign_mode = not self.mod_assign_mode
+        dpg.set_item_label(sender, "Exit Mod Mode" if self.mod_assign_mode else "+ Mod")
+        dpg.bind_item_theme(sender, self.theme_step_active if self.mod_assign_mode else 0)
+    def _open_mod_editor(self, sender, app_data, user_data):
+        if not self.mod_assign_mode: return
+        self.active_mod_param = user_data
+        dpg.set_item_label("mod_window", f"Modulating: {self.params[user_data]['label']}")
+        self._draw_mod_curve(); dpg.show_item("mod_window")
+    def _draw_mod_curve(self):
+        if not self.active_mod_param or not self.dpg_started or not dpg.does_item_exist("mod_polyline"): return
+        curve = self.modulation_curves[self.active_mod_param]
+        points = [((i/(self.step_resolution-1))*self.mod_canvas_width, (1-v)*self.mod_canvas_height) for i,v in enumerate(curve)]
+        dpg.configure_item("mod_polyline", points=points)
+    def _update_mod_drawing(self, sender, app_data, user_data):
+        if not dpg.is_item_hovered("mod_canvas") or not dpg.is_mouse_button_down(0): return
+        mx, my = dpg.get_drawing_mouse_pos()
+        if 0<=mx<self.mod_canvas_width and 0<=my<self.mod_canvas_height:
+            idx = int(round((mx/self.mod_canvas_width)*(self.step_resolution-1)))
+            val = 1.0 - (my/self.mod_canvas_height)
+            self.modulation_curves[self.active_mod_param][idx] = np.clip(val,0,1)
+            self._draw_mod_curve()
+    def _mod_process(self, sender, app_data, user_data):
+        if not self.active_mod_param: return
+        c = self.modulation_curves[self.active_mod_param]
+        if user_data=='smooth': c = np.convolve(c, np.ones(3)/3, mode='same')
+        elif user_data=='quantize': c = np.round(c*3)/3
+        elif user_data=='randomize': c = np.random.rand(self.step_resolution)
+        elif user_data=='clear': c = np.ones(self.step_resolution)
+        self.modulation_curves[self.active_mod_param] = np.clip(c,0,1)
+        self._draw_mod_curve()
+
+    def _save_state(self, sender, app_data, user_data):
+        state = {
+            "patterns": self.patterns, "pattern_lengths": self.pattern_lengths,
+            "params": {k: v['value'] for k, v in self.params.items()},
+            "mod_curves": {k: v.tolist() for k, v in self.modulation_curves.items()}
+        }
+        with open(app_data['file_path_name'], 'w') as f: json.dump(state, f, indent=4)
+    def _load_state(self, sender, app_data, user_data):
+        with open(app_data['file_path_name'], 'r') as f: state = json.load(f)
+        self.patterns = state.get("patterns", self.patterns)
+        self.pattern_lengths = state.get("pattern_lengths", self.pattern_lengths)
+        for k, v in state.get("params", {}).items():
+            if k in self.params: self.params[k]['value'] = v
+        for k, v in state.get("mod_curves", {}).items():
+            if k in self.modulation_curves: self.modulation_curves[k] = np.array(v)
+        self._update_ui_from_state()
+    def _update_ui_from_state(self):
+        for name, data in self.params.items(): dpg.set_value(name, data['value'])
+        for name, length in self.pattern_lengths.items(): dpg.set_value(f"len_input_{name}", length)
+        for name in self.instrument_names:
+            for i in range(self.step_resolution):
+                is_on = self.patterns[name][i] == 1
+                dpg.bind_item_theme(f"step_{name}_{i}", self.theme_step_on if is_on else self.theme_step_off)
+
+    def _key_press_handler(self, sender, app_data, user_data):
+        if app_data == dpg.mvKey_Space: self.start_stop_playback(sender, app_data, user_data)
+        elif app_data == dpg.mvKey_LeftArrow and not self.is_playing:
             self.current_step = (self.current_step - 1 + self.step_resolution) % self.step_resolution
             self._update_step_highlight()
-        elif data == 39 and not self.is_playing: # 39 is right arrow
+        elif app_data == dpg.mvKey_RightArrow and not self.is_playing:
             self.current_step = (self.current_step + 1) % self.step_resolution
             self._update_step_highlight()
-        elif dpg.is_key_down(dpg.mvKey_Control) and data == 83: dpg.show_item("file_dialog_save") # S
-        elif dpg.is_key_down(dpg.mvKey_Control) and data == 76: dpg.show_item("file_dialog_load") # L
+        elif dpg.is_key_down(dpg.mvKey_Control) and app_data == dpg.mvKey_S: dpg.show_item("file_dialog_save")
+        elif dpg.is_key_down(dpg.mvKey_Control) and app_data == dpg.mvKey_L: dpg.show_item("file_dialog_load")
 
     def _setup_gui(self):
         dpg.create_context()
-        dpg.create_viewport(title='Retro Drum Tracker', width=1280, height=800)
-
         self.font = None
         with dpg.font_registry():
             try: self.font = dpg.add_font("CGA.ttf", 16)
             except Exception: print("Warning: Could not load 'CGA.ttf'. Using default font.")
 
         with dpg.theme() as self.global_theme:
-            with dpg.theme_component():
+            with dpg.theme_component(dpg.mvAll):
                 dpg.add_theme_color(dpg.mvThemeCol_WindowBg,(211,211,211)); dpg.add_theme_color(dpg.mvThemeCol_Border,(0,0,0)); dpg.add_theme_color(dpg.mvThemeCol_FrameBg,(211,211,211)); dpg.add_theme_color(dpg.mvThemeCol_Button,(211,211,211)); dpg.add_theme_color(dpg.mvThemeCol_Header,(180,180,180)); dpg.add_theme_color(dpg.mvThemeCol_CheckMark,(0,0,0)); dpg.add_theme_color(dpg.mvThemeCol_SliderGrab,(0,0,0)); dpg.add_theme_color(dpg.mvThemeCol_ChildBg, (211,211,211))
                 dpg.add_theme_style(dpg.mvStyleVar_FrameBorderSize,1); dpg.add_theme_style(dpg.mvStyleVar_WindowBorderSize,1); dpg.add_theme_style(dpg.mvStyleVar_ChildBorderSize,1); dpg.add_theme_style(dpg.mvStyleVar_FrameRounding,0)
                 if self.font: dpg.add_theme_font(self.font)
         dpg.bind_theme(self.global_theme)
 
-        # Other themes...
         with dpg.theme() as self.theme_step_off:
             with dpg.theme_component(dpg.mvButton): dpg.add_theme_color(dpg.mvThemeCol_Button, (180,180,180))
         with dpg.theme() as self.theme_step_on:
@@ -286,31 +338,64 @@ class RetroDrumMachine:
         with dpg.theme() as self.theme_step_active:
             with dpg.theme_component(dpg.mvButton): dpg.add_theme_color(dpg.mvThemeCol_Button, (255,0,0))
 
-        # File dialogs and other UI (simplified callbacks for old DPG)
-        dpg.add_file_dialog(directory_selector=False, show=False, callback=lambda s, a: self._save_state(s, a), tag="file_dialog_save", width=400, height=400)
-        dpg.add_file_dialog(directory_selector=False, show=False, callback=lambda s, a: self._load_state(s, a), tag="file_dialog_load", width=400, height=400)
+        dpg.add_file_dialog(directory_selector=False, show=False, callback=self._save_state, tag="file_dialog_save", width=400, height=400)
+        dpg.add_file_dialog(directory_selector=False, show=False, callback=self._load_state, tag="file_dialog_load", width=400, height=400)
 
-        # Main Window construction...
+        self.mod_canvas_width, self.mod_canvas_height = 400, 200
+        with dpg.window(label="Modulation Editor", tag="mod_window", show=False, no_close=True, width=self.mod_canvas_width+40):
+            with dpg.group(horizontal=True):
+                for m in ['smooth','quantize','randomize','clear']: dpg.add_button(label=m.capitalize(), callback=self._mod_process, user_data=m)
+            with dpg.drawlist(width=self.mod_canvas_width, height=self.mod_canvas_height, tag="mod_canvas"):
+                dpg.draw_rectangle((0,0), (self.mod_canvas_width, self.mod_canvas_height), fill=(240,240,240))
+                dpg.draw_polyline([], color=(0,0,0), thickness=2, tag="mod_polyline")
+            with dpg.handler_registry(): dpg.add_mouse_drag_handler(0, callback=self._update_mod_drawing)
+            dpg.add_button(label="Close", callback=lambda: dpg.hide_item("mod_window"), width=-1)
+
         with dpg.window(label="Retro Drum Tracker", tag="main_window"):
-            # UI elements... (this part is long and mostly the same)
-            pass # Placeholder for brevity, the full UI is built here in the actual code
+            def add_param_control(p_name, width=120):
+                p_info = self.params[p_name]
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label=p_info['label'], width=80, callback=self._open_mod_editor, user_data=p_name)
+                    if 'min' in p_info: dpg.add_slider_float(tag=p_name, width=width, min_value=p_info['min'], max_value=p_info['max'], callback=self._update_param_callback, user_data=p_name, default_value=p_info['value'])
+                    else: dpg.add_checkbox(tag=p_name, callback=self._update_param_callback, user_data=p_name, default_value=p_info['value'])
 
-        dpg.set_primary_window("main_window", True)
-        dpg.setup_dearpygui()
-        dpg.show_viewport()
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Start", tag="start_stop_btn", callback=self.start_stop_playback); dpg.add_button(label="+ Mod", tag="mod_mode_btn", callback=self._toggle_mod_mode)
+                add_param_control("bpm"); dpg.add_text("★", color=(255,0,0)); add_param_control("master_gain")
+            dpg.add_separator()
+            # Remove use_internal_id for compatibility
+            with dpg.child_window():
+                with dpg.collapsing_header(label="INSTRUMENT PARAMETERS", default_open=True):
+                    for name in self.instrument_names:
+                        with dpg.collapsing_header(label=name.upper()):
+                            for p_suf in ["gain","pitch","decay","fm_depth"]:
+                                if f"{name}_{p_suf}" in self.params: add_param_control(f"{name}_{p_suf}")
+                    for cat, params in [("BELL FM", ["bell_fm_b_a","bell_fm_c_b","bell_fm_a_c"]), ("KICK RING MODULATION", sorted([p for p in self.params if "rm" in p]))]:
+                        with dpg.collapsing_header(label=cat):
+                            for p_name in params: add_param_control(p_name)
+                dpg.add_separator()
+                with dpg.group():
+                    for name in self.instrument_names:
+                        with dpg.group(horizontal=True):
+                            dpg.add_text(f"{name.upper():<7}")
+                            dpg.add_button(label="<", small=True, callback=self._change_pattern_length, user_data=(name,-1))
+                            dpg.add_input_int(tag=f"len_input_{name}", width=60, default_value=self.pattern_lengths[name], callback=self._set_pattern_length, user_data=name, on_enter=True)
+                            dpg.add_button(label=">", small=True, callback=self._change_pattern_length, user_data=(name,1))
+                            with dpg.group(horizontal=True):
+                                for i in range(self.step_resolution):
+                                    btn = dpg.add_button(label="", tag=f"step_{name}_{i}", width=25, height=25, callback=self._toggle_step_callback, user_data=(name,i))
+                                    dpg.bind_item_theme(btn, self.theme_step_off)
+
+        with dpg.handler_registry():
+            dpg.add_key_press_handler(callback=self._key_press_handler)
 
     def run(self):
-        self._setup_gui() # This now only sets up the structure
-
-        # Old DPG style manual render loop
-        while dpg.is_dearpygui_running():
-            try:
-                task = self.gui_queue.get_nowait()
-                if task.get("action") == "update_highlight":
-                    self._update_step_highlight(clear=task.get("clear", False))
-            except queue.Empty:
-                pass
-            dpg.render_dearpygui_frame()
+        self._setup_gui()
+        dpg.setup_dearpygui()
+        dpg.show_viewport()
+        self.dpg_started = True
+        dpg.set_primary_window("main_window", True)
+        dpg.start_dearpygui()
 
         self.is_playing = False
         if self.sequencer_thread: self.sequencer_thread.join()
@@ -320,6 +405,4 @@ class RetroDrumMachine:
 
 if __name__ == "__main__":
     app = RetroDrumMachine()
-    # The full UI setup needs to be inside run or called from it before the loop
-    # This is a simplified structure for the fix. The full overwrite will have the complete UI setup logic.
     app.run()
