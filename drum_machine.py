@@ -8,7 +8,7 @@ from math import sin, pi
 import queue
 
 # ==============================================================================
-# CSOUND ORCHESTRA (Limiter removed for compatibility)
+# CSOUND ORCHESTRA
 # ==============================================================================
 CSOUND_ORC = """
 sr = 44100
@@ -267,6 +267,32 @@ class RetroDrumMachine:
             self.modulation_curves[self.active_mod_param][idx] = np.clip(val,0,1)
             self._draw_mod_curve()
 
+    def _save_state(self, sender, data):
+        app_data = dpg.get_value(sender)
+        state = {
+            "patterns": self.patterns, "pattern_lengths": self.pattern_lengths,
+            "params": {k: v['value'] for k, v in self.params.items()},
+            "mod_curves": {k: v.tolist() for k, v in self.modulation_curves.items()}
+        }
+        with open(app_data['file_path_name'], 'w') as f: json.dump(state, f, indent=4)
+    def _load_state(self, sender, data):
+        app_data = dpg.get_value(sender)
+        with open(app_data['file_path_name'], 'r') as f: state = json.load(f)
+        self.patterns = state.get("patterns", self.patterns)
+        self.pattern_lengths = state.get("pattern_lengths", self.pattern_lengths)
+        for k, v in state.get("params", {}).items():
+            if k in self.params: self.params[k]['value'] = v
+        for k, v in state.get("mod_curves", {}).items():
+            if k in self.modulation_curves: self.modulation_curves[k] = np.array(v)
+        self._update_ui_from_state()
+    def _update_ui_from_state(self):
+        for name, data in self.params.items(): dpg.set_value(name, data['value'])
+        for name, length in self.pattern_lengths.items(): dpg.set_value(f"len_input_{name}", length)
+        for name in self.instrument_names:
+            for i in range(self.step_resolution):
+                is_on = self.patterns[name][i] == 1
+                dpg.bind_item_theme(f"step_{name}_{i}", self.theme_step_on if is_on else self.theme_step_off)
+
     def _setup_gui(self):
         dpg.create_viewport(title='Retro Drum Tracker', maximized=True)
         self.font = None
@@ -288,8 +314,8 @@ class RetroDrumMachine:
         with dpg.theme(tag="theme_step_active"):
             with dpg.theme_component(dpg.mvButton): dpg.add_theme_color(dpg.mvThemeCol_Button, (255,0,0))
 
-        dpg.add_file_dialog(directory_selector=False, show=False, callback=lambda s, a: self._save_state(s, a), tag="file_dialog_save", width=400, height=400)
-        dpg.add_file_dialog(directory_selector=False, show=False, callback=lambda s, a: self._load_state(s, a), tag="file_dialog_load", width=400, height=400)
+        dpg.add_file_dialog(directory_selector=False, show=False, callback=self._save_state, tag="file_dialog_save", width=400, height=400)
+        dpg.add_file_dialog(directory_selector=False, show=False, callback=self._load_state, tag="file_dialog_load", width=400, height=400)
 
         self.mod_canvas_width, self.mod_canvas_height = 400, 200
         with dpg.window(label="Modulation Editor", tag="mod_window", show=False, no_close=True, width=self.mod_canvas_width+40):
@@ -314,14 +340,16 @@ class RetroDrumMachine:
                 add_param_control("bpm"); dpg.add_text("★", color=(255,0,0)); add_param_control("master_gain")
             dpg.add_separator()
             with dpg.child_window(width=-1, height=-1):
-                with dpg.collapsing_header(label="INSTRUMENT PARAMETERS", default_open=True):
-                    for name in self.instrument_names:
-                        with dpg.collapsing_header(label=name.upper()):
-                            for p_suf in ["gain","pitch","decay","fm_depth"]:
-                                if f"{name}_{p_suf}" in self.params: add_param_control(f"{name}_{p_suf}")
-                    for cat, params in [("BELL FM", ["bell_fm_b_a","bell_fm_c_b","bell_fm_a_c"]), ("KICK RING MODULATION", sorted([p for p in self.params if "rm" in p]))]:
-                        with dpg.collapsing_header(label=cat):
-                            for p_name in params: add_param_control(p_name)
+                dpg.add_text("INSTRUMENT PARAMETERS"); dpg.add_separator()
+                for name in self.instrument_names:
+                    with dpg.group():
+                        dpg.add_text(name.upper())
+                        for p_suf in ["gain","pitch","decay","fm_depth"]:
+                            if f"{name}_{p_suf}" in self.params: add_param_control(f"{name}_{p_suf}")
+                dpg.add_spacer(height=10); dpg.add_text("BELL FM"); dpg.add_separator()
+                for p_name in ["bell_fm_b_a","bell_fm_c_b","bell_fm_a_c"]: add_param_control(p_name)
+                dpg.add_spacer(height=10); dpg.add_text("KICK RING MODULATION"); dpg.add_separator()
+                for p_name in sorted([p for p in self.params if "rm" in p]): add_param_control(p_name)
                 dpg.add_separator()
                 with dpg.group():
                     for name in self.instrument_names:
